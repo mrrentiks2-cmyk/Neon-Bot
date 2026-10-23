@@ -1,0 +1,64 @@
+name: Build APK
+
+on:
+  push:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Unpack project archive (if the repo contains only a zip)
+        run: |
+          if [ ! -f settings.gradle ]; then
+            Z=$(ls *.zip 2>/dev/null | head -n1)
+            if [ -z "$Z" ]; then echo "В корне репозитория нет ни проекта, ни zip-архива"; exit 1; fi
+            unzip -o -q "$Z" -d _unz
+            S=$(find _unz -maxdepth 3 -name settings.gradle | head -n1)
+            if [ -z "$S" ]; then echo "В архиве не найден settings.gradle"; exit 1; fi
+            cp -a "$(dirname "$S")"/. .
+          fi
+
+      - name: Get llama.cpp (offline AI engine)
+        run: |
+          if [ ! -f app/src/main/cpp/llama.cpp/CMakeLists.txt ]; then
+            rm -rf app/src/main/cpp/llama.cpp
+            git clone --depth 1 --branch b11836 https://github.com/ggml-org/llama.cpp app/src/main/cpp/llama.cpp
+          fi
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - uses: android-actions/setup-android@v3
+
+      - name: Install NDK and CMake
+        run: sdkmanager "ndk;29.0.14206865" "cmake;3.31.6"
+
+      - name: Build APK
+        run: |
+          chmod +x gradlew
+          ./gradlew assembleRelease --no-daemon --stacktrace
+
+      - name: Collect APK
+        run: cp app/build/outputs/apk/release/app-release.apk NeonRoleplay.apk
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: NeonRoleplay-apk
+          path: NeonRoleplay.apk
+
+      - name: Publish APK to Releases (direct download)
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: rp-build-${{ github.run_number }}
+          name: Neon Roleplay — сборка ${{ github.run_number }}
+          body: Скачайте NeonRoleplay.apk ниже и установите на телефон.
+          files: NeonRoleplay.apk
+          make_latest: true
